@@ -46,8 +46,8 @@ and np_pat
 (** returns the [Location.t] of the given pattern. **)
 let rec loc_of_pat = function
   | NPpat_any loc -> loc
-  | NPpat_var {loc} -> loc
-  | NPpat_alias (_, {loc}) -> loc
+  | NPpat_var {loc; _} -> loc
+  | NPpat_alias (_, {loc; _}) -> loc
   | NPpat_tuple (_, loc) -> loc
   | NPpat_variant (_, _, loc) -> loc
   | NPpat_map p -> loc_of_pat p
@@ -57,22 +57,22 @@ let rec loc_of_pat = function
 (** convert the RHS of a [let] into a [np_processor]. **)
 let rec processor_of_rhs ~name ~dom ~cod ~loc e0 =
   let rec get_args acc = function
-    | {pexp_desc = Pexp_fun (lbl, dflt, pat, body)} ->
-       let arg = lbl, dflt, pat in
-       get_args (arg::acc) body
-    | {pexp_desc = Pexp_function cases; pexp_loc = clauses_loc} ->
-       List.rev acc, cases, clauses_loc
-    | {pexp_loc = loc} ->
-       Location.raise_errorf ~loc
-         "processor must end in 'function' expression"
+    | {pexp_desc = Pexp_fun (lbl, dflt, pat, body); _} ->
+      let arg = lbl, dflt, pat in
+      get_args (arg::acc) body
+    | {pexp_desc = Pexp_function cases; pexp_loc = clauses_loc; _} ->
+      List.rev acc, cases, clauses_loc
+    | {pexp_loc = loc; _} ->
+      Location.raise_errorf ~loc
+        "processor must end in 'function' expression"
   in
   let clause_of_case {pc_lhs = p; pc_rhs = e; pc_guard = g} =
     match g with
-    | Some {pexp_loc = loc} ->
-       Location.raise_errorf ~loc
-         "guards not allowed in nanopass clauses"
+    | Some {pexp_loc = loc; _} ->
+      Location.raise_errorf ~loc
+        "guards not allowed in nanopass clauses"
     | None ->
-       pat_of_pattern p, e
+      pat_of_pattern p, e
   in
   let args, cases, clauses_loc = get_args [] e0 in
   let clauses = List.map clause_of_case cases in
@@ -91,33 +91,33 @@ and pat_of_pattern p =
     | Ppat_any -> NPpat_any p.ppat_loc
     | Ppat_var x -> NPpat_var x
     | Ppat_alias (p, name) ->
-       NPpat_alias (pat_of_pattern p, name)
+      NPpat_alias (pat_of_pattern p, name)
     | Ppat_tuple ps ->
-       NPpat_tuple (List.map pat_of_pattern ps, p.ppat_loc)
+      NPpat_tuple (List.map pat_of_pattern ps, p.ppat_loc)
     | Ppat_variant (v, arg) ->
-       NPpat_variant (v, Option.map pat_of_pattern arg, p.ppat_loc)
+      NPpat_variant (v, Option.map pat_of_pattern arg, p.ppat_loc)
     | _ ->
-       Location.raise_errorf ~loc:p.ppat_loc
-         "this kind of pattern not allowed in nanopass clause"
+      Location.raise_errorf ~loc:p.ppat_loc
+        "this kind of pattern not allowed in nanopass clause"
   in
   p.ppat_attributes
   |> List.fold_left
-       (fun pat (attr, payload)->
-         let {txt; loc} : string loc = attr in
-         match txt, payload with
-         | "l", _ -> NPpat_map pat
-         | "r", _ ->
-            begin match payload with
-            | PStr [ {pstr_desc = Pstr_eval (e, _)} ] ->
-               NPpat_cata (pat, Some e)
-            | PStr [ ] ->
-               NPpat_cata (pat, None)
-            | _ ->
-               Location.raise_errorf ~loc
-                 "invalid argument to [@r] attribute"
-            end
-         | _ -> pat)
-       base_pat
+    (fun pat (attr, payload)->
+       let {txt; loc} : string loc = attr in
+       match txt, payload with
+       | "l", _ -> NPpat_map pat
+       | "r", _ ->
+         begin match payload with
+           | PStr [ {pstr_desc = Pstr_eval (e, _); _} ] ->
+             NPpat_cata (pat, Some e)
+           | PStr [ ] ->
+             NPpat_cata (pat, None)
+           | _ ->
+             Location.raise_errorf ~loc
+               "invalid argument to [@r] attribute"
+         end
+       | _ -> pat)
+    base_pat
 
 
 let signature_arrow = "=>"
@@ -127,18 +127,19 @@ let signature_arrow = "=>"
 let extract_pass_sig = function
   | {pexp_desc =
        Pexp_apply
-         ({pexp_desc = Pexp_ident {txt = Lident arrow}},
-          [ Nolabel, {pexp_desc = Pexp_construct ({txt = Lident l0_name; loc = l0_loc}, None)};
-            Nolabel, {pexp_desc = Pexp_construct ({txt = Lident l1_name; loc = l1_loc}, None)} ])}
-       when arrow = signature_arrow
+         ({pexp_desc = Pexp_ident {txt = Lident arrow; _}; _},
+          [ Nolabel, {pexp_desc = Pexp_construct ({txt = Lident l0_name; loc = l0_loc}, None); _};
+            Nolabel, {pexp_desc = Pexp_construct ({txt = Lident l1_name; loc = l1_loc}, None); _} ]);
+     _}
+    when arrow = signature_arrow
     ->
-     (l0_name, l0_loc),
-     (l1_name, l1_loc)
+    (l0_name, l0_loc),
+    (l1_name, l1_loc)
 
-  | {pexp_loc = loc} ->
-     Location.raise_errorf ~loc
-       "invalid language specification; expected 'LX %s LY'"
-       signature_arrow
+  | {pexp_loc = loc; _} ->
+    Location.raise_errorf ~loc
+      "invalid language specification; expected 'LX %s LY'"
+      signature_arrow
 
 (** extract domain and co-domain from the name of a production.
     the rules are:
@@ -158,7 +159,7 @@ let extract_dom_cod ~loc l0 l1 name =
       Lang.language_nonterm lang name
     with Not_found ->
       Location.raise_errorf ~loc
-         "no such nonterminal %S in language %S" name lang.Lang.npl_name
+        "no such nonterminal %S in language %S" name lang.Lang.npl_name
   in
   let get_nt_opt lang name =
     try
@@ -176,112 +177,115 @@ let extract_dom_cod ~loc l0 l1 name =
 
 (** convert a [value_binding] into a [np_pass] *)
 let pass_of_value_binding = function
-  | {pvb_pat = {ppat_desc = Ppat_var {txt = name}};
+  | {pvb_pat = {ppat_desc = Ppat_var {txt = name; _}; _};
      pvb_loc = loc;
      pvb_expr = e0;
-     pvb_attributes = pass_attr::_} ->
+     pvb_attributes = pass_attr::_;
+     _} ->
 
-     (* parse language from [[@pass L0 --> L1]] *)
-     let find_lang ~loc l =
-       Lang.find_language l
-         ~exn:(Location.Error
-                 (Location.errorf ~loc
-                    "language %S has not been defined" l))
-     in
-     let l0, l1 =
-       match snd pass_attr with
-       | PStr [ {pstr_desc = Pstr_eval (lang_expr, [])} ] ->
-          let (l0_name, l0_loc), (l1_name, l1_loc) = extract_pass_sig lang_expr in
-          find_lang l0_loc l0_name,
-          find_lang l1_loc l1_name
-       | _ ->
-          Location.raise_errorf ~loc:(fst pass_attr).loc
-            "invalid [@pass] syntax"
-     in
+    (* parse language from [[@pass L0 --> L1]] *)
+    let find_lang ~loc l =
+      Lang.find_language l
+        ~exn:(Location.Error
+                (Location.errorf ~loc
+                   "language %S has not been defined" l))
+    in
+    let l0, l1 =
+      match snd pass_attr with
+      | PStr [ {pstr_desc = Pstr_eval (lang_expr, []); _} ] ->
+        let (l0_name, l0_loc), (l1_name, l1_loc) = extract_pass_sig lang_expr in
+        find_lang ~loc:l0_loc l0_name,
+        find_lang ~loc:l1_loc l1_name
+      | _ ->
+        Location.raise_errorf ~loc:(fst pass_attr).loc
+          "invalid [@pass] syntax"
+    in
 
-     (* convert expression [e] into [f, vbs, body], where
-        [vbs] are the value_bindings of the processors, [body]
-        is the final expression, and [f] is a function that inserts
-        its argument in place of the processors/body. *)
-     let rec extract_definitions f =
-       function
-       | {pexp_desc = Pexp_extension ({txt = "passes"}, PStr stmts); pexp_loc = passes_loc} ->
-          let entry = ref None in
-          let extract_stmt_bindings = begin function
-            | {pstr_desc = Pstr_value (Recursive, vbs)} ->
-              let set_entry_name = begin function
-                | Ppat_var {txt = name} -> entry := Some name
-                | _ -> ()
-              end in
-              List.iter (fun vb -> if List.exists (fun ({Asttypes.txt}, _) -> txt = "entry") vb.pvb_attributes then set_entry_name vb.pvb_pat.ppat_desc) vbs;
-              vbs
-            | _ -> []
-          end in
-          let vbs = List.fold_right (fun bindings lst -> extract_stmt_bindings bindings @ lst) stmts []
-          and body = match !entry with
-            | None -> failwith "[%passes ...] requires a designated [@entry] function"
-            | Some id -> {pexp_desc = Pexp_ident {txt = Lident id; loc = passes_loc};
-                          pexp_loc = passes_loc;
-                          pexp_attributes = []} in
-          f, vbs, body
+    (* convert expression [e] into [f, vbs, body], where
+       [vbs] are the value_bindings of the processors, [body]
+       is the final expression, and [f] is a function that inserts
+       its argument in place of the processors/body. *)
+    let rec extract_definitions f =
+      function
+      | {pexp_desc = Pexp_extension ({txt = "passes"; _}, PStr stmts); pexp_loc = passes_loc; _} ->
+        let entry = ref None in
+        let extract_stmt_bindings = begin function
+          | {pstr_desc = Pstr_value (Recursive, vbs); _} ->
+            let set_entry_name = begin function
+              | Ppat_var {txt = name; _} -> entry := Some name
+              | _ -> ()
+            end in
+            List.iter (fun vb -> if List.exists (fun ({Asttypes.txt; _}, _) -> txt = "entry") vb.pvb_attributes then set_entry_name vb.pvb_pat.ppat_desc) vbs;
+            vbs
+          | _ -> []
+        end in
+        let vbs = List.fold_right (fun bindings lst -> extract_stmt_bindings bindings @ lst) stmts []
+        and body = match !entry with
+          | None -> failwith "[%passes ...] requires a designated [@entry] function"
+          | Some id -> {pexp_desc = Pexp_ident {txt = Lident id; loc = passes_loc};
+                        pexp_loc = passes_loc;
+                        pexp_attributes = []} in
+        f, vbs, body
 
-       | {pexp_desc = Pexp_fun (lbl, dflt, pat, body)} as e ->
-          extract_definitions
-            (fun e' -> f {e with pexp_desc = Pexp_fun (lbl, dflt, pat, e')})
-            body
+      | {pexp_desc = Pexp_fun (lbl, dflt, pat, body); _} as e ->
+        extract_definitions
+          (fun e' -> f {e with pexp_desc = Pexp_fun (lbl, dflt, pat, e')})
+          body
 
-       | {pexp_desc = Pexp_letmodule (name, mod_expr, body)} as e ->
-         extract_definitions
-           (fun e' -> f {e with pexp_desc = Pexp_letmodule (name, mod_expr, e')})
-           body
+      | {pexp_desc = Pexp_letmodule (name, mod_expr, body); _} as e ->
+        extract_definitions
+          (fun e' -> f {e with pexp_desc = Pexp_letmodule (name, mod_expr, e')})
+          body
 
-       | {pexp_desc = Pexp_letexception (exn, body)} as e ->
-         extract_definitions
-           (fun e' -> f {e with pexp_desc = Pexp_letexception (exn, e')})
-           body
+      | {pexp_desc = Pexp_letexception (exn, body); _} as e ->
+        extract_definitions
+          (fun e' -> f {e with pexp_desc = Pexp_letexception (exn, e')})
+          body
 
-       | {pexp_desc = Pexp_let (recf, vbs, ({pexp_desc = Pexp_let _} as body))} as e
-       | ({pexp_desc = Pexp_let (recf, vbs, ({pexp_desc = Pexp_extension _} as body))} as e) ->
-          extract_definitions
-            (fun e' -> f {e with pexp_desc = Pexp_let (recf, vbs, e')})
-            body
+      | {pexp_desc = Pexp_let (recf, vbs, ({pexp_desc = Pexp_let _; _} as body)); _} as e
+      | ({pexp_desc = Pexp_let (recf, vbs, ({pexp_desc = Pexp_extension _; _} as body)); _} as e) ->
+        extract_definitions
+          (fun e' -> f {e with pexp_desc = Pexp_let (recf, vbs, e')})
+          body
 
-       | {pexp_desc = Pexp_let (Recursive, vbs, body)} ->
-          f, vbs, body
+      | {pexp_desc = Pexp_let (Recursive, vbs, body); _} ->
+        f, vbs, body
 
-       | {pexp_loc = loc} ->
-          Location.raise_errorf ~loc
-            "let[@pass] must end in either a [%%passes ...] block or a recursive let, followed by a single expression"
-     in
-     let pre, bindings, post = extract_definitions identity e0 in
+      | {pexp_loc = loc; _} ->
+        Location.raise_errorf ~loc
+          "let[@pass] must end in either a [%%passes ...] block or a recursive let, followed by a single expression"
+    in
+    let pre, bindings, post = extract_definitions identity e0 in
 
-     (* parse processors from bindings in final letrec *)
-     let procs =
-       List.map (function
-           | {pvb_pat = {ppat_desc = Ppat_var {txt = name}};
-              pvb_expr = proc_rhs;
-              pvb_loc = loc;
-              pvb_attributes = ats}
-             ->
-              (* parse dom/cod names *)
-              let (dom, cod) = extract_dom_cod ~loc l0 l1 name in
-              processor_of_rhs ~name ~loc ~dom ~cod proc_rhs
+    (* parse processors from bindings in final letrec *)
+    let procs =
+      List.map (function
+          | {pvb_pat = {ppat_desc = Ppat_var {txt = name; _}; _};
+             pvb_expr = proc_rhs;
+             pvb_loc = loc;
+             (* pvb_attributes = ats; *)
+             pvb_attributes = _;
+             _}
+            ->
+            (* parse dom/cod names *)
+            let (dom, cod) = extract_dom_cod ~loc l0 l1 name in
+            processor_of_rhs ~name ~loc ~dom ~cod proc_rhs
 
-           | {pvb_loc = loc} ->
-              Location.raise_errorf ~loc
-                "invalid processor definition")
-         bindings
-     in
+          | {pvb_loc = loc; _} ->
+            Location.raise_errorf ~loc
+              "invalid processor definition")
+        bindings
+    in
 
-     {npp_name = name;
-      npp_loc = loc;
-      npp_input = l0;
-      npp_output = l1;
-      npp_pre = pre;
-      npp_post = post;
-      npp_procs = procs}
+    {npp_name = name;
+     npp_loc = loc;
+     npp_input = l0;
+     npp_output = l1;
+     npp_pre = pre;
+     npp_post = post;
+     npp_procs = procs}
 
 
-  | {pvb_loc = loc} ->
-     Location.raise_errorf ~loc
-       "invalid pass definition"
+  | {pvb_loc = loc; _} ->
+    Location.raise_errorf ~loc
+      "invalid pass definition"

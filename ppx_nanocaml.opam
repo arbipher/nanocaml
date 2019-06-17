@@ -5,5 +5,5 @@ homepage: "https://github.com/nanocaml/nanocaml"
 bug-reports: "https://github.com/nanocaml/nanocaml/issues"
 license: "MIT"
 dev-repo: "git+https://github.com/nanocaml/nanocaml.git"
-build: ["jbuilder" "build" "-p" name "-j" jobs]
-depends: ["batteries" "jbuilder" { build } "ocaml-migrate-parsetree"]
+build: ["dune" "build" "-p" name "-j" jobs]
+depends: ["batteries" "dune" {build & >= "1.0" } "ocaml-migrate-parsetree"]

@@ -33,7 +33,7 @@ type np_language =
 let rec string_of_type = function
   | NP_term core_type ->
     begin match core_type.ptyp_desc with
-      | Ptyp_constr ({txt = l}, _) -> "<core> (" ^ List.last (Longident.flatten l) ^ ")"
+      | Ptyp_constr ({txt = l; loc = _}, _) -> "<core> (" ^ List.last (Longident.flatten l) ^ ")"
       | _ -> "<core>"
     end
   | NP_nonterm s -> s
@@ -79,7 +79,7 @@ let type_of_core_type ~nt_names t =
   let rec cvt ptyp =
     match ptyp.ptyp_desc with
     (* nonterminal: *)
-    | Ptyp_constr ({txt = Longident.Lident name}, [])
+    | Ptyp_constr ({txt = Longident.Lident name; _}, [])
       when List.mem name nt_names ->
       NP_nonterm name
     (* tuple: *)
@@ -87,7 +87,7 @@ let type_of_core_type ~nt_names t =
       let npts = List.map cvt typs in
       NP_tuple npts
     (* list: *)
-    | Ptyp_constr ({txt = Longident.Lident "list"}, [elem]) ->
+    | Ptyp_constr ({txt = Longident.Lident "list"; _}, [elem]) ->
       NP_list (cvt elem)
     (* otherwise, it's a terminal: *)
     | _ ->
@@ -99,112 +99,121 @@ let type_of_core_type ~nt_names t =
 let production_of_row_field ~nt_names =
   function
   | Rtag (name, _, _, args) ->
-     {nppr_name = name;
-      nppr_arg = match args with
-                 | [t] -> Some (type_of_core_type ~nt_names t)
-                 | _ -> None}
+    {nppr_name = name;
+     nppr_arg = match args with
+       | [t] -> Some (type_of_core_type ~nt_names t)
+       | _ -> None}
 
-  | Rinherit {ptyp_loc = loc} ->
-     Location.raise_errorf ~loc
-       "invalid nanopass production form"
+  | Rinherit {ptyp_loc = loc; ptyp_desc = _; ptyp_attributes = _} ->
+    Location.raise_errorf ~loc
+      "invalid nanopass production form"
 
 (** convert [type_declaration] into nanopass nonterminal **)
 let nonterm_of_type_decl ?extending ~nt_names = function
   (* type nt = [ `A | `B ... ] *)
-  | {ptype_name = {txt = name};
+  | {ptype_name = {txt = name; loc = _};
      ptype_loc = loc;
      ptype_params = [];
      ptype_kind = Ptype_abstract;
-     ptype_manifest = Some {ptyp_desc = Ptyp_variant (rows, Closed, _)}}
+     ptype_manifest = Some {ptyp_desc = Ptyp_variant (rows, Closed, _); ptyp_loc = _ ; ptyp_attributes = _};
+     ptype_cstrs = _;
+     ptype_private = _;
+     ptype_attributes = _
+    }
     ->
-     let prods = List.map (production_of_row_field ~nt_names) rows in
-     {npnt_loc = loc;
-      npnt_name = name;
-      npnt_productions = prods}
+    let prods = List.map (production_of_row_field ~nt_names) rows in
+    {npnt_loc = loc;
+     npnt_name = name;
+     npnt_productions = prods}
 
   (* type nt = { add : [ `A ... ] ; del : [ `B ... ] } *)
-  | {ptype_name = {txt = name};
+  | {ptype_name = {txt = name; loc = _};
      ptype_loc = loc;
      ptype_params = [];
-     ptype_kind = Ptype_record decls}
+     ptype_kind = Ptype_record decls;
+     ptype_cstrs = _; 
+     ptype_private = _;
+     ptype_manifest = _; 
+     ptype_attributes = _}
     ->
-     let lang =
-       Option.get_exn extending
-         (Location.Error
-            (Location.errorf ~loc "must be extending a language to use this form"))
-     in
-     let old_nontem =
-       language_nonterm lang name
-         ~exn:(Location.Error
-                 (Location.errorf ~loc "no such nonterminal %S in language %S"
-                    name lang.npl_name))
-     in
+    let lang =
+      Option.get_exn extending
+        (Location.Error
+           (Location.errorf ~loc "must be extending a language to use this form"))
+    in
+    let old_nontem =
+      language_nonterm lang name
+        ~exn:(Location.Error
+                (Location.errorf ~loc "no such nonterminal %S in language %S"
+                   name lang.npl_name))
+    in
 
-     (* get the 'lname' label out of the record, and parse
-        the productions contained in the type. *)
-     let get_prods lname =
-       match List.find_opt
-               (fun {pld_name = {txt = x}} -> x = lname)
-               decls
-       with
-       | None -> None
-       | Some {pld_type = {ptyp_desc = Ptyp_variant (rows, Closed, _)}} ->
-          Some (List.map (production_of_row_field ~nt_names) rows)
-       | Some _ ->
-          Location.raise_errorf ~loc
-            "invalid extended production"
-     in
+    (* get the 'lname' label out of the record, and parse
+       the productions contained in the type. *)
+    let get_prods lname =
+      match List.find_opt
+              (fun {pld_name = {txt = x; _}; _} -> x = lname)
+              decls
+      with
+      | None -> None
+      | Some {pld_type = {ptyp_desc = Ptyp_variant (rows, Closed, _); _}; _} ->
+        Some (List.map (production_of_row_field ~nt_names) rows)
+      | Some _ ->
+        Location.raise_errorf ~loc
+          "invalid extended production"
+    in
 
-     (* create functions for adding productions / deleting productions
-        if the 'add' or 'del' labels are omitted, then nothing is added / removed. *)
-     let add =
-       Option.map_default
-         (fun add_prs -> List.append add_prs)
-         identity (* do nothing when [None] *)
-         (get_prods "add")
-     in
-     let del =
-       Option.map_default
-         (fun del_prs ->
+    (* create functions for adding productions / deleting productions
+       if the 'add' or 'del' labels are omitted, then nothing is added / removed. *)
+    let add =
+      Option.map_default
+        (fun add_prs -> List.append add_prs)
+        identity (* do nothing when [None] *)
+        (get_prods "add")
+    in
+    let del =
+      Option.map_default
+        (fun del_prs ->
            let keep p = List.for_all (fun p' -> p.nppr_name <> p'.nppr_name) del_prs in
            List.filter keep)
-         identity
-         (get_prods "del")
-     in
+        identity
+        (get_prods "del")
+    in
 
-     let prods = old_nontem.npnt_productions |> del |> add in
-     {npnt_loc = loc;
-      npnt_name = name;
-      npnt_productions = prods}
+    let prods = old_nontem.npnt_productions |> del |> add in
+    {npnt_loc = loc;
+     npnt_name = name;
+     npnt_productions = prods}
 
   (* invalid nonterminal *)
-  | {ptype_loc = loc} ->
-     Location.raise_errorf ~loc
-       "invalid nanopass type declaration form"
+  | {ptype_loc = loc; _} ->
+    Location.raise_errorf ~loc
+      "invalid nanopass type declaration form"
 
 (** convert [module_binding] into nanopass language **)
 let language_of_module = function
   (* module L = struct type nt = ... end *)
   (* must be one single recursive type decl *)
-  | {pmb_name = {txt = lang_name};
+  | {pmb_name = {txt = lang_name; _};
      pmb_loc = loc;
      pmb_expr =
        {pmod_desc =
           Pmod_structure
-            [ {pstr_desc = Pstr_type (Recursive, type_decls)} ]}}
+            [ {pstr_desc = Pstr_type (Recursive, type_decls); _} ]; _};
+     _ }
     ->
-     let nt_names = List.map (fun {ptype_name = {txt}} -> txt) type_decls in
-     let nonterms = List.map (nonterm_of_type_decl ~nt_names) type_decls in
-     {npl_loc = loc;
-      npl_name = lang_name;
-      npl_nonterms = nonterms}
+    let nt_names = List.map (fun {ptype_name = {txt; _}; _} -> txt) type_decls in
+    let nonterms = List.map (nonterm_of_type_decl ~nt_names) type_decls in
+    {npl_loc = loc;
+     npl_name = lang_name;
+     npl_nonterms = nonterms}
 
   (* module L = struct
        include L'
        type nt = ...
      end *)
   (* must be a single include + a single recursive type decl*)
-  | {pmb_name = {txt = lang_name};
+  | {pmb_name = {txt = lang_name; _};
      pmb_loc = loc;
      pmb_expr =
        {pmod_desc =
@@ -213,42 +222,47 @@ let language_of_module = function
                  Pstr_include
                    {pincl_mod =
                       {pmod_desc =
-                         Pmod_ident {txt = Lident ext_lang_name}}}};
-              {pstr_desc = Pstr_type (Recursive, type_decls)} ]}}
+                         Pmod_ident {txt = Lident ext_lang_name; _};
+                       _};
+                    _};
+               _};
+              {pstr_desc = Pstr_type (Recursive, type_decls); _} ];
+        _};
+     _}
     ->
-     (* the language we are extending *)
-     let ext_lang =
-       find_language ext_lang_name
-         ~exn:(Location.Error
-                 (Location.errorf ~loc
-                    "language %S has not been defined" ext_lang_name))
-     in
+    (* the language we are extending *)
+    let ext_lang =
+      find_language ext_lang_name
+        ~exn:(Location.Error
+                (Location.errorf ~loc
+                   "language %S has not been defined" ext_lang_name))
+    in
 
-     (* new nonterminal names *)
-     let nt_names = List.map (fun {ptype_name = {txt}} -> txt) type_decls in
-     (* old nonterminal names *)
-     let nt_names' = List.map (fun {npnt_name} -> npnt_name) ext_lang.npl_nonterms in
-     (* new nonterminals *)
-     let nonterms =
-       List.map (nonterm_of_type_decl
-                   ~extending:ext_lang
-                   ~nt_names:(nt_names @ nt_names'))
-         type_decls
-     in
-     (* old nonterminals (only the unmodified ones) *)
-     let nonterms' =
-       List.filter_map (fun name ->
-           if List.mem name nt_names then
-             None
-           else
-             Some (language_nonterm ext_lang name))
-         nt_names'
-     in
+    (* new nonterminal names *)
+    let nt_names = List.map (fun {ptype_name = {txt; _}; _} -> txt) type_decls in
+    (* old nonterminal names *)
+    let nt_names' = List.map (fun {npnt_name; _} -> npnt_name) ext_lang.npl_nonterms in
+    (* new nonterminals *)
+    let nonterms =
+      List.map (nonterm_of_type_decl
+                  ~extending:ext_lang
+                  ~nt_names:(nt_names @ nt_names'))
+        type_decls
+    in
+    (* old nonterminals (only the unmodified ones) *)
+    let nonterms' =
+      List.filter_map (fun name ->
+          if List.mem name nt_names then
+            None
+          else
+            Some (language_nonterm ext_lang name))
+        nt_names'
+    in
 
-     {npl_loc = loc;
-      npl_name = lang_name;
-      npl_nonterms = nonterms @ nonterms'}
+    {npl_loc = loc;
+     npl_name = lang_name;
+     npl_nonterms = nonterms @ nonterms'}
 
-  | {pmb_loc = loc} ->
-     Location.raise_errorf ~loc
-       "invalid nanopass language form"
+  | {pmb_loc = loc; _} ->
+    Location.raise_errorf ~loc
+      "invalid nanopass language form"

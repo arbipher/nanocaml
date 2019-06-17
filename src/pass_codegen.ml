@@ -90,8 +90,8 @@ module Lib_ast = struct
   let fold_exp ~loc list_exp init_exp elem_pat acc_pat body_exp =
     A.Exp.apply ~loc (A.Exp.ident ~loc {txt = fold_lid; loc})
       [ Nolabel, A.Exp.fun_ ~loc Nolabel None elem_pat
-                   (A.Exp.fun_ ~loc Nolabel None acc_pat
-                      body_exp)
+          (A.Exp.fun_ ~loc Nolabel None acc_pat
+             body_exp)
       ; Nolabel, list_exp
       ; Nolabel, init_exp
       ]
@@ -118,7 +118,7 @@ module Lib_ast = struct
              A.Exp.ident ~loc (lident_of_id tl)) cons_pats))]
     and tuple =
       A.Exp.tuple ~loc (List.map (fun ((hd, _), _) ->
-             A.Exp.ident ~loc (lident_of_id hd)) cons_pats) in
+          A.Exp.ident ~loc (lident_of_id hd)) cons_pats) in
     let fn_body =
       A.Exp.function_ ~loc
         [ A.Exp.case (A.Pat.tuple ~loc (List.map (fun (_, pat) -> pat) cons_pats))
@@ -136,7 +136,7 @@ let rec gen_simple_pat = function
   | NPpat_var id -> A.Pat.var ~loc:id.loc id
   | NPpat_alias (pat, id) -> A.Pat.alias ~loc:id.loc (gen_simple_pat pat) id
   | NPpat_tuple (pats, loc) -> A.Pat.tuple ~loc (List.map gen_simple_pat pats)
-  | pat -> failwith "gen_simple_pat called on non-simple pat"
+  | _ (* pat *) -> failwith "gen_simple_pat called on non-simple pat"
 
 
 (** given an [np_pat], returns [ppat, intro], where [ppat] is the generated
@@ -148,77 +148,77 @@ let rec gen_simple_pat = function
     [~next_id] is a [ref int] used to generate fresh identifies
     if [~bind_as] is [Some <string loc>], the given string will be
     bound to the result of the pattern.
- *)
+*)
 let rec gen_pattern ~next_id ~bind_as pat =
   let loc = loc_of_pat pat in
   match pat with
   | NPpat_any _ ->
-     let ppat = match bind_as with
-       | None -> A.Pat.any ~loc ()
-       | Some id -> A.Pat.var ~loc id (* [_ as x] becomes just [x] *)
-     in ppat, identity
+    let ppat = match bind_as with
+      | None -> A.Pat.any ~loc ()
+      | Some id -> A.Pat.var ~loc id (* [_ as x] becomes just [x] *)
+    in ppat, identity
 
   | NPpat_var id ->
-     let ppat = A.Pat.var ~loc:id.loc id in
-     let ppat = match bind_as with
-       | None -> ppat
-       | Some id' -> A.Pat.alias ~loc:id.loc ppat id' (* [x as y] = [x as y] *)
-     in ppat, identity
+    let ppat = A.Pat.var ~loc:id.loc id in
+    let ppat = match bind_as with
+      | None -> ppat
+      | Some id' -> A.Pat.alias ~loc:id.loc ppat id' (* [x as y] = [x as y] *)
+    in ppat, identity
 
   | NPpat_alias (pat, id) ->
-     begin match bind_as with
-     | None -> gen_pattern ~next_id ~bind_as:(Some id) pat
-     | Some outer_id ->
+    begin match bind_as with
+      | None -> gen_pattern ~next_id ~bind_as:(Some id) pat
+      | Some outer_id ->
         (* BEFORE: (p as x) as y -> e
            AFTER: p as x -> let y = x in e *)
         let ppat, intro = gen_pattern ~next_id ~bind_as:(Some id) pat in
         ppat, intro % simple_let outer_id (exp_of_id id)
-     end
+    end
 
   | NPpat_tuple (pats, _) ->
-     let ppats, intro = match bind_as with
-       | None ->
-          let ppats, intros =
-            List.enum pats
-            |> Enum.map (gen_pattern ~next_id ~bind_as)
-            |> Enum.collect2
-          in ppats, compose_all intros
+    let ppats, intro = match bind_as with
+      | None ->
+        let ppats, intros =
+          List.enum pats
+          |> Enum.map (gen_pattern ~next_id ~bind_as)
+          |> Enum.collect2
+        in ppats, compose_all intros
 
-       | Some id ->
-          (* BEFORE: (p,q) as x -> e
-             AFTER: (p as t0, q as t1) -> let x = t0, t1 in e *)
-          let ppats, intros, binds =
-            List.enum pats
-            |> Enum.map (fun pat ->
-                   let bind = fresh ~next_id ~loc in
-                   let p, f = gen_pattern ~next_id ~bind_as:(Some bind) pat in
-                   p, f, bind)
-            |> Enum.collect3
-          in
-          let tuple_exp = A.Exp.tuple ~loc (List.map exp_of_id binds) in
-          ppats, compose_all intros % simple_let id tuple_exp
-     in
-     A.Pat.tuple ~loc ppats, intro
+      | Some id ->
+        (* BEFORE: (p,q) as x -> e
+           AFTER: (p as t0, q as t1) -> let x = t0, t1 in e *)
+        let ppats, intros, binds =
+          List.enum pats
+          |> Enum.map (fun pat ->
+              let bind = fresh ~next_id ~loc in
+              let p, f = gen_pattern ~next_id ~bind_as:(Some bind) pat in
+              p, f, bind)
+          |> Enum.collect3
+        in
+        let tuple_exp = A.Exp.tuple ~loc (List.map exp_of_id binds) in
+        ppats, compose_all intros % simple_let id tuple_exp
+    in
+    A.Pat.tuple ~loc ppats, intro
 
   | NPpat_variant (lbl, opt_pat, _) ->
-     (* TODO: this may be refactor-able, but i'm not sure. *)
-     begin match opt_pat, bind_as with
-     | None, None ->
+    (* TODO: this may be refactor-able, but i'm not sure. *)
+    begin match opt_pat, bind_as with
+      | None, None ->
         A.Pat.variant ~loc lbl None, identity
-     | None, Some id ->
+      | None, Some id ->
         (* note: we can't just do [`Var as x] because that may cause type errors
            if we're expecting the reinterpret the variant. *)
         A.Pat.variant ~loc lbl None,
         simple_let id (A.Exp.variant ~loc lbl None)
-     | Some pat, None ->
+      | Some pat, None ->
         let ppat, intro = gen_pattern ~next_id ~bind_as:None pat in
         A.Pat.variant ~loc lbl (Some ppat), intro
-     | Some pat, Some id ->
+      | Some pat, Some id ->
         let bind = fresh ~next_id ~loc in
         let ppat, intro = gen_pattern ~next_id ~bind_as:(Some bind) pat in
         A.Pat.variant ~loc lbl (Some ppat),
         intro % simple_let id (A.Exp.variant ~loc lbl (Some (exp_of_id bind)))
-     end
+    end
 
   (* this should never be the case after typeck, but
      in case it is, just ignore the missing catamorphism. *)
@@ -226,8 +226,8 @@ let rec gen_pattern ~next_id ~bind_as pat =
     gen_pattern ~next_id ~bind_as pat
 
   | NPpat_cata (pat, Some cata_exp) ->
-     (* BEFORE: (p [@r cata]) -> e
-        AFTER: t0 -> let p = cata t0 in e *)
+    (* BEFORE: (p [@r cata]) -> e
+       AFTER: t0 -> let p = cata t0 in e *)
     let pat = match bind_as with
       | None -> pat
       | Some id -> NPpat_alias (pat, id) in
@@ -238,12 +238,12 @@ let rec gen_pattern ~next_id ~bind_as pat =
       (A.Exp.apply ~loc cata_exp [ Nolabel, exp_of_id cata_tmp ])
 
   | NPpat_map pat ->
-     let pat = match bind_as with None -> pat | Some id -> NPpat_alias (pat, id) in
-     let list_tmp = fresh ~next_id ~loc in
-     A.Pat.var ~loc list_tmp,
-     simple_pat_let
-       (gen_l_lhs ~loc pat)
-       (gen_l_rhs ~next_id pat list_tmp)
+    let pat = match bind_as with None -> pat | Some id -> NPpat_alias (pat, id) in
+    let list_tmp = fresh ~next_id ~loc in
+    A.Pat.var ~loc list_tmp,
+    simple_pat_let
+      (gen_l_lhs ~loc pat)
+      (gen_l_rhs ~next_id pat list_tmp)
 
 (** generate the LHS pattern for a [@l] pattern (for binding the
     results of the list comprehension). *)
@@ -260,28 +260,28 @@ and gen_l_rhs ~next_id pat list_tmp =
   let ppat, intro = gen_pattern ~next_id ~bind_as:None pat in
   match vars_of_pattern pat with
   | [] ->
-     (* TODO: generate List.iter in case any catas have side effects *)
-     A.Exp.construct ~loc {txt = Lident "()"; loc} None
+    (* TODO: generate List.iter in case any catas have side effects *)
+    A.Exp.construct ~loc {txt = Lident "()"; loc} None
 
   | [x] ->
-     Lib_ast.map_exp ~loc
-       (exp_of_id list_tmp)
-       ppat
-       (intro (exp_of_id x))
+    Lib_ast.map_exp ~loc
+      (exp_of_id list_tmp)
+      ppat
+      (intro (exp_of_id x))
 
   | xs ->
-     let empty = A.Exp.construct ~loc {txt = Lident "[]"; loc} None in
-     let cons x y =
-       let arg = A.Exp.tuple ~loc [ exp_of_id x; exp_of_id y ] in
-       A.Exp.construct ~loc {txt = Lident "::"; loc} (Some arg)
-     in
-     let acc_tmps = List.map (fun {Asttypes.loc} -> fresh ~next_id ~loc) xs in
-     Lib_ast.fold_exp ~loc
-       (exp_of_id list_tmp)
-       (A.Exp.tuple ~loc (List.map (const empty) xs))
-       ppat
-       (A.Pat.tuple ~loc (List.map (A.Pat.var ~loc) acc_tmps))
-       (intro (A.Exp.tuple ~loc (List.map2 cons xs acc_tmps)))
+    let empty = A.Exp.construct ~loc {txt = Lident "[]"; loc} None in
+    let cons x y =
+      let arg = A.Exp.tuple ~loc [ exp_of_id x; exp_of_id y ] in
+      A.Exp.construct ~loc {txt = Lident "::"; loc} (Some arg)
+    in
+    let acc_tmps = List.map (fun {Asttypes.loc; _} -> fresh ~next_id ~loc) xs in
+    Lib_ast.fold_exp ~loc
+      (exp_of_id list_tmp)
+      (A.Exp.tuple ~loc (List.map (const empty) xs))
+      ppat
+      (A.Pat.tuple ~loc (List.map (A.Pat.var ~loc) acc_tmps))
+      (intro (A.Exp.tuple ~loc (List.map2 cons xs acc_tmps)))
 
 
 
@@ -293,13 +293,14 @@ let typ_of_nonterm ~loc lang nt =
     []
 
 let gen_zipper_exps ~next_id ~loc =
+  let _ = loc in
   let mapper =
     let open Ast_mapper in
     { default_mapper with
       expr = fun mapper expr -> match expr with
         | { pexp_desc = Pexp_tuple es;
             pexp_loc = loc;
-            pexp_attributes = [{txt = "l"}, _] } ->
+            pexp_attributes = [{txt = "l"; _}, _] } ->
           let name = fresh ~next_id ~loc
           and es = List.map (default_mapper.expr mapper) es in
           let apply_zipper =
@@ -318,8 +319,8 @@ let gen_processor_vb l0 l1 proc =
   let clause_lhs, clause_rhs =
     List.enum proc.npc_clauses
     |> Enum.map (fun (pat, rhs_exp) ->
-           let p_lhs, intro = gen_pattern ~next_id ~bind_as:None pat in
-           p_lhs, intro rhs_exp)
+        let p_lhs, intro = gen_pattern ~next_id ~bind_as:None pat in
+        p_lhs, intro rhs_exp)
     |> Enum.collect2
   in
 
@@ -335,8 +336,8 @@ let gen_processor_vb l0 l1 proc =
            {pc_lhs = lhs;
             pc_guard = None;
             pc_rhs = gen_zipper_exps ~next_id ~loc rhs})
-         clause_lhs
-         clause_rhs)
+          clause_lhs
+          clause_rhs)
   in
   (* annotate match expr if co-domain is present *)
   let match_expr = match opt_cod_typ with
@@ -355,8 +356,8 @@ let gen_processor_vb l0 l1 proc =
     (A.Pat.var ~loc {txt = proc.npc_name; loc})
     (List.fold_right (fun (lbl, dflt, p) body_exp ->
          A.Exp.fun_ ~loc:p.ppat_loc lbl dflt p body_exp)
-       proc.npc_args
-       clauses_fn_expr)
+        proc.npc_args
+        clauses_fn_expr)
 
 
 (** generate [value_binding] from [np_pass]. **)
