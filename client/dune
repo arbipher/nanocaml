@@ -1,0 +1,7 @@
+(executable
+ (name silly_church)
+ (libraries nanocaml)
+ (preprocess
+  (pps 
+    nanocaml
+    ocaml-migrate-parsetree.driver-main)))
